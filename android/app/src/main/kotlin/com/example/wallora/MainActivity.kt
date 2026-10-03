@@ -3,9 +3,13 @@ package com.example.wallora
 import android.app.WallpaperManager
 import android.content.ComponentName
 import android.content.Intent
+import android.graphics.BitmapFactory
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
+import java.net.HttpURLConnection
+import java.net.URL
+import kotlin.concurrent.thread
 
 class MainActivity : FlutterActivity() {
 
@@ -23,39 +27,26 @@ class MainActivity : FlutterActivity() {
 
             when (call.method) {
 
+                // =========================================
+                // LIVE WALLPAPER
+                // =========================================
+
                 "openLiveWallpaper" -> {
 
-                    val name =
-                        call.argument<String>("name")
-                            ?: "Wallora"
+                    val videoUrl =
+                        call.argument<String>(
+                            "videoUrl"
+                        ) ?: ""
 
-                    val fontSize =
-                        call.argument<Double>("fontSize")
-                            ?: 48.0
+                    if (videoUrl.isBlank()) {
+                        result.error(
+                            "VIDEO_URL_ERROR",
+                            "Video URL is empty.",
+                            null
+                        )
 
-                    val color =
-                        call.argument<Long>("color")
-                            ?: 0xFFFFFFFFL
-
-                    val glow =
-                        call.argument<Boolean>("glow")
-                            ?: true
-
-                    val positionX =
-                        call.argument<Double>("positionX")
-                            ?: 80.0
-
-                    val positionY =
-                        call.argument<Double>("positionY")
-                            ?: 200.0
-
-                    val rotation =
-                        call.argument<Double>("rotation")
-                            ?: 0.0
-
-                    // =====================================
-                    // حفظ إعدادات المستخدم
-                    // =====================================
+                        return@setMethodCallHandler
+                    }
 
                     getSharedPreferences(
                         "wallora_settings",
@@ -63,78 +54,49 @@ class MainActivity : FlutterActivity() {
                     )
                         .edit()
                         .putString(
-                            "name",
-                            name
-                        )
-                        .putFloat(
-                            "fontSize",
-                            fontSize.toFloat()
-                        )
-                        .putLong(
-                            "color",
-                            color
-                        )
-                        .putBoolean(
-                            "glow",
-                            glow
-                        )
-                        .putFloat(
-                            "positionX",
-                            positionX.toFloat()
-                        )
-                        .putFloat(
-                            "positionY",
-                            positionY.toFloat()
-                        )
-                        .putFloat(
-                            "rotation",
-                            rotation.toFloat()
+                            "videoUrl",
+                            videoUrl
                         )
                         .apply()
 
-                    // =====================================
-                    // تصدير الفيديو
-                    // =====================================
+                    try {
+                        openWallpaperPicker()
 
-                    val exporter =
-                        WallpaperVideoExporter(
-                            applicationContext
+                        result.success(true)
+                    } catch (e: Exception) {
+                        result.error(
+                            "WALLPAPER_ERROR",
+                            e.message
+                                ?: "Unable to open live wallpaper.",
+                            null
+                        )
+                    }
+                }
+
+                // =========================================
+                // PHOTO WALLPAPER
+                // =========================================
+
+                "setPhotoWallpaper" -> {
+
+                    val imageUrl =
+                        call.argument<String>(
+                            "imageUrl"
+                        ) ?: ""
+
+                    if (imageUrl.isBlank()) {
+                        result.error(
+                            "IMAGE_URL_ERROR",
+                            "Image URL is empty.",
+                            null
                         )
 
-                    exporter.export(
+                        return@setMethodCallHandler
+                    }
 
-                        onSuccess = {
-
-                            runOnUiThread {
-
-                                try {
-
-                                    openWallpaperPicker()
-
-                                    result.success(true)
-
-                                } catch (e: Exception) {
-
-                                    result.error(
-                                        "WALLPAPER_ERROR",
-                                        e.message,
-                                        null
-                                    )
-                                }
-                            }
-                        },
-
-                        onError = { error ->
-
-                            runOnUiThread {
-
-                                result.error(
-                                    "EXPORT_ERROR",
-                                    error,
-                                    null
-                                )
-                            }
-                        }
+                    setPhotoWallpaper(
+                        imageUrl,
+                        result
                     )
                 }
 
@@ -145,39 +107,167 @@ class MainActivity : FlutterActivity() {
         }
     }
 
-    // =============================================
-    // فتح شاشة Live Wallpapers
-    // =============================================
+    // =====================================================
+    // LIVE WALLPAPER
+    // =====================================================
 
     private fun openWallpaperPicker() {
 
         try {
 
-            // نطلب من Android فتح Wallora مباشرة
-            val directIntent = Intent(
-                WallpaperManager.ACTION_CHANGE_LIVE_WALLPAPER
-            )
+            val intent =
+                Intent(
+                    WallpaperManager
+                        .ACTION_CHANGE_LIVE_WALLPAPER
+                )
 
-            directIntent.putExtra(
-                WallpaperManager.EXTRA_LIVE_WALLPAPER_COMPONENT,
+            intent.putExtra(
+                WallpaperManager
+                    .EXTRA_LIVE_WALLPAPER_COMPONENT,
                 ComponentName(
                     this,
                     WalloraWallpaperService::class.java
                 )
             )
 
-            startActivity(directIntent)
+            startActivity(intent)
 
         } catch (e: Exception) {
 
-            // Samsung أو الجهاز لم يقبل الفتح المباشر
-            // نفتح قائمة Live Wallpapers العامة
+            val intent =
+                Intent(
+                    WallpaperManager
+                        .ACTION_LIVE_WALLPAPER_CHOOSER
+                )
 
-            val chooserIntent = Intent(
-                WallpaperManager.ACTION_LIVE_WALLPAPER_CHOOSER
-            )
+            startActivity(intent)
+        }
+    }
 
-            startActivity(chooserIntent)
+    // =====================================================
+    // PHOTO WALLPAPER
+    // =====================================================
+
+    private fun setPhotoWallpaper(
+        imageUrl: String,
+        result: MethodChannel.Result
+    ) {
+
+        thread {
+
+            var connection: HttpURLConnection? =
+                null
+
+            try {
+
+                // =========================================
+                // DOWNLOAD IMAGE
+                // =========================================
+
+                val url = URL(imageUrl)
+
+                connection =
+                    url.openConnection()
+                            as HttpURLConnection
+
+                connection.connectTimeout = 15000
+                connection.readTimeout = 30000
+                connection.instanceFollowRedirects =
+                    true
+                connection.doInput = true
+
+                connection.setRequestProperty(
+                    "User-Agent",
+                    "Wallora"
+                )
+
+                connection.connect()
+
+                val responseCode =
+                    connection.responseCode
+
+                if (responseCode !in 200..299) {
+
+                    throw Exception(
+                        "Image download failed. HTTP $responseCode"
+                    )
+                }
+
+                // =========================================
+                // DECODE IMAGE
+                // =========================================
+
+                val bitmap =
+                    connection.inputStream.use {
+                            inputStream ->
+
+                        BitmapFactory.decodeStream(
+                            inputStream
+                        )
+                    }
+
+                if (bitmap == null) {
+
+                    throw Exception(
+                        "Android could not decode the image."
+                    )
+                }
+
+                // =========================================
+                // SET WALLPAPER
+                // =========================================
+
+                val wallpaperManager =
+                    WallpaperManager.getInstance(
+                        applicationContext
+                    )
+
+                wallpaperManager.setBitmap(
+                    bitmap,
+                    null,
+                    true,
+                    WallpaperManager.FLAG_SYSTEM
+                )
+
+                bitmap.recycle()
+
+                // =========================================
+                // SUCCESS
+                // =========================================
+
+                runOnUiThread {
+
+                    result.success(
+                        mapOf(
+                            "success" to true,
+                            "message" to
+                                    "Wallpaper applied successfully."
+                        )
+                    )
+                }
+
+            } catch (e: Exception) {
+
+                e.printStackTrace()
+
+                // =========================================
+                // ERROR
+                // =========================================
+
+                runOnUiThread {
+
+                    result.error(
+                        "PHOTO_WALLPAPER_ERROR",
+                        e.message
+                            ?: e.javaClass.simpleName,
+                        null
+                    )
+                }
+
+            } finally {
+
+                connection?.disconnect()
+            }
         }
     }
 }

@@ -3,6 +3,8 @@ package com.example.wallora
 import android.content.Context
 import android.graphics.Typeface
 import android.net.Uri
+import android.os.Handler
+import android.os.Looper
 import android.text.Spannable
 import android.text.SpannableString
 import android.text.style.ForegroundColorSpan
@@ -26,12 +28,17 @@ import androidx.media3.transformer.ExportResult
 import androidx.media3.transformer.Transformer
 
 import java.io.File
-import java.io.FileOutputStream
+import java.net.HttpURLConnection
+import java.net.URL
+import kotlin.concurrent.thread
 import kotlin.math.PI
 
 class WallpaperVideoExporter(
     private val context: Context
 ) {
+
+    private val mainHandler =
+        Handler(Looper.getMainLooper())
 
     @OptIn(UnstableApi::class)
     fun export(
@@ -39,146 +46,237 @@ class WallpaperVideoExporter(
         onError: (String) -> Unit
     ) {
 
-        try {
+        // =============================================
+        // قراءة الإعدادات
+        // =============================================
 
-            // =========================================
-            // قراءة إعدادات المستخدم
-            // =========================================
+        val preferences =
+            context.getSharedPreferences(
+                "wallora_settings",
+                Context.MODE_PRIVATE
+            )
 
-            val preferences =
-                context.getSharedPreferences(
-                    "wallora_settings",
-                    Context.MODE_PRIVATE
+        val userName =
+            preferences.getString(
+                "name",
+                ""
+            ) ?: ""
+
+        val fontSize =
+            preferences.getFloat(
+                "fontSize",
+                48f
+            )
+
+        val textColor =
+            preferences.getLong(
+                "color",
+                0xFFFFFFFFL
+            )
+
+        val glow =
+            preferences.getBoolean(
+                "glow",
+                true
+            )
+
+        val positionX =
+            preferences.getFloat(
+                "positionX",
+                0.5f
+            )
+
+        val positionY =
+            preferences.getFloat(
+                "positionY",
+                0.5f
+            )
+
+        val rotationRadians =
+            preferences.getFloat(
+                "rotation",
+                0f
+            )
+
+        val videoUrl =
+            preferences.getString(
+                "videoUrl",
+                ""
+            ) ?: ""
+
+        // =============================================
+        // التأكد من وجود رابط
+        // =============================================
+
+        if (videoUrl.isBlank()) {
+            onError("Video URL is empty.")
+            return
+        }
+
+        // =============================================
+        // ملف الفيديو المؤقت
+        // =============================================
+
+        val inputFile =
+            File(
+                context.cacheDir,
+                "wallora_input.mp4"
+            )
+
+        // =============================================
+        // التنزيل فقط على Background Thread
+        // =============================================
+
+        thread {
+
+            try {
+
+                if (inputFile.exists()) {
+                    inputFile.delete()
+                }
+
+                downloadVideo(
+                    videoUrl,
+                    inputFile
                 )
 
-            val userName =
-                preferences.getString(
-                    "name",
-                    "Wallora"
-                ) ?: "Wallora"
+                if (
+                    !inputFile.exists() ||
+                    inputFile.length() <= 0
+                ) {
 
-            val fontSize =
-                preferences.getFloat(
-                    "fontSize",
-                    48f
-                )
+                    mainHandler.post {
+                        onError(
+                            "Downloaded video is empty."
+                        )
+                    }
 
-            val textColor =
-                preferences.getLong(
-                    "color",
-                    0xFFFFFFFFL
-                )
+                    return@thread
+                }
 
-            val glow =
-                preferences.getBoolean(
-                    "glow",
-                    true
-                )
+                // =============================================
+                // مهم جداً:
+                // الرجوع إلى Main Thread قبل Media3 Transformer
+                // =============================================
 
-            val positionX =
-                preferences.getFloat(
-                    "positionX",
-                    0.5f
-                )
+                mainHandler.post {
 
-            val positionY =
-                preferences.getFloat(
-                    "positionY",
-                    0.5f
-                )
+                    try {
 
-            val rotationRadians =
-                preferences.getFloat(
-                    "rotation",
-                    0f
-                )
+                        startTransformer(
+                            inputFile = inputFile,
+                            userName = userName,
+                            fontSize = fontSize,
+                            textColor = textColor,
+                            glow = glow,
+                            positionX = positionX,
+                            positionY = positionY,
+                            rotationRadians = rotationRadians,
+                            onSuccess = onSuccess,
+                            onError = onError
+                        )
 
-            // =========================================
-            // تحويل الموقع
-            //
-            // Flutter:
-            // X/Y من 0 إلى 1
-            //
-            // Media3:
-            // X/Y من -1 إلى +1
-            // =========================================
+                    } catch (e: Exception) {
 
-            val mediaX =
-                (
-                        positionX
-                            .coerceIn(0f, 1f) *
-                                2f
-                        ) - 1f
-
-            val mediaY =
-                1f -
-                        (
-                                positionY
-                                    .coerceIn(0f, 1f) *
-                                        2f
-                                )
-
-            // =========================================
-            // تحويل الدوران
-            //
-            // Flutter = radians
-            // Media3 = degrees
-            // =========================================
-
-            val rotationDegrees =
-                (
-                        rotationRadians *
-                                180.0 /
-                                PI
-                        ).toFloat()
-
-            // =========================================
-            // تجهيز الفيديو الأصلي
-            // =========================================
-
-            val inputFile =
-                File(
-                    context.cacheDir,
-                    "wallora_input.mp4"
-                )
-
-            if (inputFile.exists()) {
-                inputFile.delete()
-            }
-
-            context.resources
-                .openRawResource(
-                    R.raw.wallpaper1
-                )
-                .use { input ->
-
-                    FileOutputStream(
-                        inputFile
-                    ).use { output ->
-
-                        input.copyTo(
-                            output
+                        onError(
+                            e.message
+                                ?: "Failed to start Transformer."
                         )
                     }
                 }
 
-            // =========================================
-            // الفيديو النهائي
-            // =========================================
+            } catch (e: Exception) {
 
-            val outputFile =
-                File(
-                    context.filesDir,
-                    "wallora_custom.mp4"
-                )
+                mainHandler.post {
 
-            if (outputFile.exists()) {
-                outputFile.delete()
+                    onError(
+                        e.message
+                            ?: "Video download failed."
+                    )
+                }
             }
+        }
+    }
 
-            // =========================================
-            // تجهيز النص
-            // =========================================
+    // =============================================
+    // Media3 Transformer
+    // يجب تشغيله على Main Thread
+    // =============================================
+
+    @OptIn(UnstableApi::class)
+    private fun startTransformer(
+        inputFile: File,
+        userName: String,
+        fontSize: Float,
+        textColor: Long,
+        glow: Boolean,
+        positionX: Float,
+        positionY: Float,
+        rotationRadians: Float,
+        onSuccess: (File) -> Unit,
+        onError: (String) -> Unit
+    ) {
+
+        // =============================================
+        // تحويل مكان النص
+        // Flutter: 0..1
+        // Media3: -1..+1
+        // =============================================
+
+        val mediaX =
+            (
+                    positionX
+                        .coerceIn(0f, 1f) *
+                            2f
+                    ) - 1f
+
+        val mediaY =
+            1f -
+                    (
+                            positionY
+                                .coerceIn(0f, 1f) *
+                                    2f
+                            )
+
+        // =============================================
+        // تحويل الدوران
+        // radians -> degrees
+        // =============================================
+
+        val rotationDegrees =
+            (
+                    rotationRadians *
+                            180.0 /
+                            PI
+                    ).toFloat()
+
+        // =============================================
+        // ملف الفيديو النهائي
+        // =============================================
+
+        val outputFile =
+            File(
+                context.filesDir,
+                "wallora_custom.mp4"
+            )
+
+        if (outputFile.exists()) {
+            outputFile.delete()
+        }
+
+        // =============================================
+        // المؤثرات
+        // =============================================
+
+        val videoEffects =
+            mutableListOf<Effect>()
+
+        // =============================================
+        // النص اختياري
+        // إذا الاسم فارغ لن يظهر أي نص
+        // =============================================
+
+        if (userName.isNotBlank()) {
 
             val overlayText =
                 SpannableString(
@@ -205,10 +303,7 @@ class WallpaperVideoExporter(
                 Spannable.SPAN_EXCLUSIVE_EXCLUSIVE
             )
 
-            // =========================================
             // حجم الخط
-            // =========================================
-
             val sizeScale =
                 (
                         fontSize /
@@ -227,35 +322,28 @@ class WallpaperVideoExporter(
                 Spannable.SPAN_EXCLUSIVE_EXCLUSIVE
             )
 
-            // =========================================
-            // إعداد مكان ودوران النص
-            // =========================================
+            // =============================================
+            // موقع ودوران النص
+            // =============================================
 
             val overlaySettings =
                 StaticOverlaySettings.Builder()
-
-                    // مركز النص
                     .setOverlayFrameAnchor(
                         0f,
                         0f
                     )
-
-                    // مكان النص داخل الفيديو
                     .setBackgroundFrameAnchor(
                         mediaX,
                         mediaY
                     )
-
-                    // دوران النص
                     .setRotationDegrees(
                         rotationDegrees
                     )
-
                     .build()
 
-            // =========================================
-            // إنشاء Text Overlay
-            // =========================================
+            // =============================================
+            // Text Overlay
+            // =============================================
 
             val textOverlay =
                 TextOverlay.createStaticTextOverlay(
@@ -263,162 +351,189 @@ class WallpaperVideoExporter(
                     overlaySettings
                 )
 
-            // =========================================
-            // مهم:
-            // OverlayEffect يحتاج List<TextureOverlay>
-            // وليس List<TextOverlay>
-            // =========================================
-
             val overlays =
                 mutableListOf<TextureOverlay>(
                     textOverlay
                 )
 
-            // =========================================
-            // Glow
-            //
-            // القيمة تصل من Flutter بشكل صحيح.
-            // سنضيف تأثير Neon الحقيقي بعد التأكد
-            // من الموقع والدوران.
-            // =========================================
+            // =============================================
+            // Neon Glow
+            // =============================================
 
             if (glow) {
-                // Neon Glow سيتم إضافته لاحقاً
+                // سنضيف الـ Neon الحقيقي لاحقاً.
             }
-
-            // =========================================
-            // Overlay Effect
-            // =========================================
 
             val overlayEffect =
                 OverlayEffect(
                     overlays
                 )
 
-            // =========================================
-            // Effects
-            // =========================================
+            videoEffects.add(
+                overlayEffect
+            )
+        }
 
-            val effects =
-                Effects(
-                    emptyList(),
-                    listOf<Effect>(
-                        overlayEffect
-                    )
+        // =============================================
+        // Effects
+        // =============================================
+
+        val effects =
+            Effects(
+                emptyList(),
+                videoEffects
+            )
+
+        // =============================================
+        // Media Item
+        // =============================================
+
+        val mediaItem =
+            MediaItem.fromUri(
+                Uri.fromFile(
+                    inputFile
                 )
+            )
 
-            // =========================================
-            // Media Item
-            // =========================================
+        // =============================================
+        // Edited Media Item
+        // =============================================
 
-            val mediaItem =
-                MediaItem.fromUri(
-                    Uri.fromFile(
-                        inputFile
-                    )
+        val editedMediaItem =
+            EditedMediaItem.Builder(
+                mediaItem
+            )
+                .setRemoveAudio(
+                    true
                 )
-
-            // =========================================
-            // Edited Media Item
-            // =========================================
-
-            val editedMediaItem =
-                EditedMediaItem.Builder(
-                    mediaItem
+                .setEffects(
+                    effects
                 )
-                    .setRemoveAudio(
-                        true
-                    )
-                    .setEffects(
-                        effects
-                    )
-                    .build()
+                .build()
 
-            // =========================================
-            // Transformer
-            // =========================================
+        // =============================================
+        // Transformer
+        // =============================================
 
-            val transformer =
-                Transformer.Builder(
-                    context
+        val transformer =
+            Transformer.Builder(
+                context
+            )
+                .setVideoMimeType(
+                    MimeTypes.VIDEO_H264
                 )
-                    .setVideoMimeType(
-                        MimeTypes.VIDEO_H264
-                    )
-                    .addListener(
+                .addListener(
 
-                        object :
-                            Transformer.Listener {
+                    object :
+                        Transformer.Listener {
 
-                            // =========================
-                            // نجاح التصدير
-                            // =========================
+                        override fun onCompleted(
+                            composition: Composition,
+                            exportResult: ExportResult
+                        ) {
 
-                            override fun onCompleted(
-                                composition:
-                                Composition,
-
-                                exportResult:
-                                ExportResult
+                            if (
+                                outputFile.exists() &&
+                                outputFile.length() > 0
                             ) {
 
-                                if (
-                                    outputFile.exists() &&
-                                    outputFile.length() > 0
-                                ) {
+                                onSuccess(
+                                    outputFile
+                                )
 
-                                    onSuccess(
-                                        outputFile
-                                    )
-
-                                } else {
-
-                                    onError(
-                                        "Export finished but output file is empty."
-                                    )
-                                }
-                            }
-
-                            // =========================
-                            // خطأ أثناء التصدير
-                            // =========================
-
-                            override fun onError(
-                                composition:
-                                Composition,
-
-                                exportResult:
-                                ExportResult,
-
-                                exportException:
-                                ExportException
-                            ) {
+                            } else {
 
                                 onError(
-                                    exportException
-                                        .message
-                                        ?: "Video export failed"
+                                    "Export finished but output file is empty."
                                 )
                             }
                         }
-                    )
-                    .build()
 
-            // =========================================
-            // بدء التصدير
-            // =========================================
+                        override fun onError(
+                            composition: Composition,
+                            exportResult: ExportResult,
+                            exportException: ExportException
+                        ) {
 
-            transformer.start(
-                editedMediaItem,
-                outputFile.absolutePath
-            )
+                            onError(
+                                exportException.message
+                                    ?: "Video export failed."
+                            )
+                        }
+                    }
+                )
+                .build()
 
-        } catch (e: Exception) {
+        // =============================================
+        // بدء التصدير
+        // =============================================
 
-            onError(
-                e.message
-                    ?: "Unknown export error"
-            )
+        transformer.start(
+            editedMediaItem,
+            outputFile.absolutePath
+        )
+    }
+
+    // =============================================
+    // تنزيل الفيديو من Cloudflare R2
+    // =============================================
+
+    private fun downloadVideo(
+        videoUrl: String,
+        destination: File
+    ) {
+
+        var connection:
+                HttpURLConnection? = null
+
+        try {
+
+            val url =
+                URL(videoUrl)
+
+            connection =
+                url.openConnection()
+                        as HttpURLConnection
+
+            connection.requestMethod =
+                "GET"
+
+            connection.connectTimeout =
+                15000
+
+            connection.readTimeout =
+                60000
+
+            connection.instanceFollowRedirects =
+                true
+
+            connection.connect()
+
+            val responseCode =
+                connection.responseCode
+
+            if (responseCode !in 200..299) {
+
+                throw Exception(
+                    "Video download failed. HTTP $responseCode"
+                )
+            }
+
+            connection.inputStream.use { input ->
+
+                destination
+                    .outputStream()
+                    .use { output ->
+
+                        input.copyTo(
+                            output
+                        )
+                    }
+            }
+
+        } finally {
+
+            connection?.disconnect()
         }
     }
 }
