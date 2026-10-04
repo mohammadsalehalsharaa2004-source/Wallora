@@ -1,0 +1,29 @@
+name: wallora
+description: "Wallora - Live Wallpapers App"
+publish_to: 'none'
+
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.11.1
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  cupertino_icons: ^1.0.8
+  video_player: ^2.9.5
+  url_launcher: ^6.3.2
+  supabase_flutter: ^2.10.3
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true
+
+  assets:
+    - assets/videos/

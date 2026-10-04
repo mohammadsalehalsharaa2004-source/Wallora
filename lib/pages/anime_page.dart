@@ -1,0 +1,130 @@
+import 'package:flutter/material.dart';
+
+import '../data/wallpapers_data.dart';
+import '../widgets/wallpaper_card.dart';
+
+class AnimePage extends StatelessWidget {
+  const AnimePage({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final animeWallpapers =
+    getWallpapersByCategory('anime');
+
+    return Scaffold(
+      backgroundColor: const Color(0xFF090B12),
+
+      appBar: AppBar(
+        backgroundColor: Colors.transparent,
+        surfaceTintColor: Colors.transparent,
+        elevation: 0,
+
+        title: const Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Anime',
+              style: TextStyle(
+                fontSize: 22,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+
+            SizedBox(height: 2),
+
+            Text(
+              'Explore anime live wallpapers',
+              style: TextStyle(
+                fontSize: 11,
+                color: Colors.white54,
+              ),
+            ),
+          ],
+        ),
+      ),
+
+      body: animeWallpapers.isEmpty
+          ? const _EmptyAnime()
+          : GridView.builder(
+        padding: const EdgeInsets.fromLTRB(
+          16,
+          16,
+          16,
+          30,
+        ),
+
+        itemCount: animeWallpapers.length,
+
+        gridDelegate:
+        const SliverGridDelegateWithFixedCrossAxisCount(
+          crossAxisCount: 2,
+          crossAxisSpacing: 12,
+          mainAxisSpacing: 12,
+          childAspectRatio: 0.62,
+        ),
+
+        itemBuilder: (context, index) {
+          final wallpaper =
+          animeWallpapers[index];
+
+          return WallpaperCard(
+            wallpaper: wallpaper,
+            index: wallpapers.indexOf(wallpaper),
+          );
+        },
+      ),
+    );
+  }
+}
+
+// =====================================================
+// EMPTY ANIME
+// =====================================================
+
+class _EmptyAnime extends StatelessWidget {
+  const _EmptyAnime();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Center(
+      child: Padding(
+        padding: EdgeInsets.all(30),
+
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+
+          children: [
+            Icon(
+              Icons.auto_awesome_rounded,
+              size: 55,
+              color: Colors.white24,
+            ),
+
+            SizedBox(height: 16),
+
+            Text(
+              'No Anime Wallpapers Yet',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: Colors.white70,
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+
+            SizedBox(height: 7),
+
+            Text(
+              'New anime wallpapers will appear here.',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: Colors.white38,
+                fontSize: 13,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
